@@ -56,7 +56,7 @@ jobs:
           done
           plutil -lint "$app/Info.plist"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSupportedPlatforms:0' "$app/Info.plist")" = iPhoneOS
-          xcrun lipo -verify_arch arm64 "$app/PhoneBox"
+          xcrun lipo "$app/PhoneBox" -verify_arch arm64
           xcrun vtool -show-build "$app/PhoneBox" | tee device-platform.log
           grep -Eq 'platform[[:space:]]+IOS$' device-platform.log
           mkdir -p dist/ios/Payload

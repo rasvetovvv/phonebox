@@ -1,0 +1,90 @@
+name: iOS device IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  device:
+    name: Build unsigned iPhone and iPad app
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Run pairing, proxy and USB tests
+        run: swift test --package-path ios/PhoneBox/PhoneBoxKit
+
+      - name: Generate Xcode project
+        working-directory: ios/PhoneBox
+        run: xcodegen generate
+
+      - name: Build Release for physical iOS devices
+        working-directory: ios/PhoneBox
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project PhoneBox.xcodeproj \
+            -scheme PhoneBox \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Verify device bundle and package IPA
+        run: |
+          set -euo pipefail
+          app="ios/PhoneBox/build/Build/Products/Release-iphoneos/PhoneBox.app"
+          for asset in Info.plist PhoneBox PanelShim.js www/index.html www/main.js www/widgets/basic.js www/style.css; do
+            test -s "$app/$asset"
+          done
+          plutil -lint "$app/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSupportedPlatforms:0' "$app/Info.plist")" = iPhoneOS
+          xcrun lipo -verify_arch arm64 "$app/PhoneBox"
+          xcrun vtool -show-build "$app/PhoneBox" | tee device-platform.log
+          grep -Eq 'platform[[:space:]]+IOS$' device-platform.log
+          mkdir -p dist/ios/Payload
+          ditto "$app" dist/ios/Payload/PhoneBox.app
+          (
+            cd dist/ios
+            /usr/bin/zip -qry PhoneBox-iOS-unsigned.ipa Payload
+            unzip -tq PhoneBox-iOS-unsigned.ipa
+            shasum -a 256 PhoneBox-iOS-unsigned.ipa > SHA256SUMS
+          )
+          {
+            echo "PhoneBox iOS device build (unsigned)"
+            echo "Source: https://github.com/$GITHUB_REPOSITORY/commit/$GITHUB_SHA"
+            echo "Workflow: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "Built (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "Target: iPhone/iPad, arm64, iOS 16.0 or newer"
+            echo "Bundle ID: net.oxog.phonebox.ios"
+            echo "Signing: unsigned; sign with your own Apple ID before installation"
+            xcodebuild -version
+            cat device-platform.log
+          } > dist/ios/build-info.txt
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: phonebox-ios-device
+          path: |
+            dist/ios/PhoneBox-iOS-unsigned.ipa
+            dist/ios/SHA256SUMS
+            dist/ios/build-info.txt
+          if-no-files-found: error
+          retention-days: 14

@@ -9,7 +9,7 @@ permissions:
 jobs:
   device:
     name: Build unsigned iPhone and iPad app
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 30
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
